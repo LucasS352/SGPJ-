@@ -1,15 +1,16 @@
-# Arquivo: robot/scraper.py (VERSÃO FINAL COM PAGINAÇÃO CORRIGIDA)
+# Arquivo: robot/scraper.py (VERSÃO COM INTEGRAÇÃO À API)
 import asyncio
 import os
 import re
 import random
+import requests # Importa a biblioteca para fazer chamadas de API
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright, TimeoutError
 from email_helper import fetch_verification_code
 from pdf_parser import extract_data_from_petition
 
 class TjspScraper:
-    # ... (__init__, _login, _random_delay, _process_digital_folder continuam os mesmos) ...
+    # ... (o __init__, _login, _random_delay e _process_digital_folder continuam os mesmos) ...
     LOGIN_URL = "https://esaj.tjsp.jus.br/cpopg/open.do"
     def __init__(self, tjsp_user, tjsp_pass, email_user, email_pass):
         self.tjsp_user = tjsp_user
@@ -76,22 +77,16 @@ class TjspScraper:
         finally:
             await digital_folder_page.close()
 
-    async def run_sessions(self, oab_list, target_contracts=100):
-        """
-        Mantém uma sessão ativa para processar múltiplos processos, com todas as verificações.
-        """
+    async def run_sessions(self, oab_list, target_contracts=10):
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=False)
             context = await browser.new_context()
             page = await context.new_page()
-
             await self._login(page)
-
             for oab_number in oab_list:
                 if self.processed_contracts >= target_contracts:
                     print(f"Meta de {target_contracts} contratos atingida. Encerrando.")
                     break
-
                 print(f"\n--- INICIANDO BUSCA PARA A OAB: {oab_number} ---")
                 await page.goto(self.LOGIN_URL)
                 await self._random_delay()
@@ -100,17 +95,14 @@ class TjspScraper:
                 await page.fill('#campo_NUMOAB', oab_number)
                 async with page.expect_navigation():
                     await page.click('#botaoConsultarProcessos')
-                
                 page_number = 1
                 while self.processed_contracts < target_contracts:
                     await self._random_delay()
                     print(f"\n--- Analisando página {page_number} de resultados da OAB {oab_number} ---")
-                    
                     process_rows = await page.locator('ul.unj-list-row > li').all()
                     if not process_rows:
                         print("Nenhum processo encontrado nesta página.")
                         break
-
                     valid_processes_on_page = []
                     for row in process_rows:
                         process_link_element = row.locator('a.linkProcesso')
@@ -120,74 +112,72 @@ class TjspScraper:
                         if "procedimento comum cível" in classe_text.lower() and "contratos bancários" in assunto_text.lower():
                             print(f"  [PROCESSO VÁLIDO ENCONTRADO]: {process_number}")
                             valid_processes_on_page.append(process_number)
-                    
                     for process_number in valid_processes_on_page:
                         if self.processed_contracts >= target_contracts: break
-                        
                         await self._random_delay()
                         print(f"\n-> Processando: {process_number}")
                         async with page.expect_navigation():
                             await page.get_by_role("link", name=process_number, exact=True).click()
-                        
                         page_content = await page.content()
                         if "extinto" in page_content.lower() or "cancelado" in page_content.lower():
                             print(f"  [AVISO]: Processo {process_number} está Extinto/Cancelado. Ignorando.")
                             await page.go_back()
                             await page.wait_for_load_state()
                             continue
-                        
                         visualizar_autos_button = page.get_by_title("Pasta digital")
                         if not await visualizar_autos_button.is_visible():
                             print(f"  [AVISO]: Botão 'Visualizar autos' não encontrado. Ignorando.")
                             await page.go_back()
                             await page.wait_for_load_state()
                             continue
-
                         async with page.context.expect_page() as folder_page_info:
                             await visualizar_autos_button.click()
-                        
                         digital_folder_page = await folder_page_info.value
                         await digital_folder_page.wait_for_load_state()
                         
+                        # --- LÓGICA DE ENVIO PARA API ---
                         extracted_data = await self._process_digital_folder(digital_folder_page, process_number)
                         
                         if extracted_data:
-                            self.processed_contracts += 1
-                            print("\n--- DADOS FINAIS DO PROCESSO ---")
-                            print(f"  Nome do Réu: {extracted_data['defendant_name']}")
-                            print(f"  CPF/CNPJ: {extracted_data['defendant_id']}")
-                            print(f"  Numero do processo: {process_number}")
-                            print(f"  Valor da Causa: R$ {extracted_data['case_value']}")
-                            print("---------------------------------")
-                            print(f"Contratos processados com sucesso: {self.processed_contracts}/{target_contracts}")
+                            payload = {
+                                "numero_processo": process_number,
+                                "nome_reu": extracted_data["defendant_name"],
+                                "cpf_cnpj_reu": extracted_data["defendant_id"],
+                                "valor_causa": extracted_data["case_value"]
+                            }
+                            try:
+                                response = requests.post("http://127.0.0.1:8000/processos/", json=payload)
+                                if response.status_code == 200:
+                                    print("  -> Dados enviados para a API e salvos no banco de dados com sucesso!")
+                                    self.processed_contracts += 1
+                                elif response.status_code == 400 and "Processo já cadastrado" in response.text:
+                                    print("  -> Processo já existente no banco de dados.")
+                                else:
+                                    print(f"  [ERRO] Falha ao enviar dados para a API: {response.status_code} - {response.text}")
+                            except Exception as e:
+                                print(f"  [ERRO] Não foi possível conectar à API: {e}")
+                            print(f"Contratos processados: {self.processed_contracts}/{target_contracts}")
+                        # --- FIM DA LÓGICA DE ENVIO ---
 
                         print("<- Voltando para a lista de processos...")
                         await page.go_back()
                         await page.wait_for_load_state()
-
                     if self.processed_contracts >= target_contracts: break
-
-                    # --- LÓGICA DE PAGINAÇÃO CORRIGIDA ---
-                    # Encontra todos os botões de "Próxima página"
                     next_page_button = page.locator('a[title="Próxima página"]')
                     if await next_page_button.count() > 0:
                         print("\nIndo para a próxima página de resultados...")
                         await self._random_delay()
-                        # Clica apenas no PRIMEIRO botão que encontrar
                         await next_page_button.first.click()
                         await page.wait_for_load_state()
                         page_number += 1
                     else:
                         print("Fim dos resultados para esta OAB.")
                         break
-
             print("\nSessão finalizada.")
             await context.close()
             await browser.close()
 
-
 async def main():
-    # ... (código do main continua o mesmo) ...
     dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
     load_dotenv(dotenv_path=dotenv_path)
     tjsp_user = os.getenv("TJSP_USER")
@@ -199,8 +189,7 @@ async def main():
         return
     oab_list_to_search = ["259958", "205961", "149225"]
     scraper = TjspScraper(tjsp_user, tjsp_pass, email_user, email_pass)
-    await scraper.run_sessions(oab_list=oab_list_to_search, target_contracts=100)
-
+    await scraper.run_sessions(oab_list=oab_list_to_search, target_contracts=10)
 
 if __name__ == "__main__":
     print("Iniciando a automação...")
