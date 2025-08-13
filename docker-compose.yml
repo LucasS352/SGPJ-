@@ -1,0 +1,55 @@
+# docker-compose.yml
+
+version: '3.8'
+
+services:
+  # Serviço do Banco de Dados
+  db:
+    image: mariadb:10.6 # Usamos uma imagem oficial e estável do MariaDB
+    container_name: juris_db
+    restart: always
+    environment:
+      # As senhas e nomes vêm do nosso arquivo .env
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql # Garante que os dados do banco persistam
+    networks:
+      - juris_network
+
+  # Serviço da API Backend
+  backend:
+    build: ./backend # Constrói a imagem a partir do Dockerfile na pasta 'backend'
+    container_name: juris_backend
+    restart: always
+    ports:
+      - "8000:8000" # Mapeia a porta 8000 do contêiner para a porta 8000 da sua máquina
+    depends_on:
+      - db # Garante que o banco de dados inicie antes da API
+    env_file:
+      - .env # Passa todas as variáveis de ambiente do arquivo .env para o contêiner
+    networks:
+      - juris_network
+
+  # Serviço do Robô Scraper
+  robot:
+    build: ./robot # Constrói a imagem a partir do Dockerfile na pasta 'robot'
+    container_name: juris_robot
+    depends_on:
+      - backend # Garante que a API esteja pronta para receber os dados
+      - db
+    env_file:
+      - .env # Passa as credenciais do TJSP, E-mail, etc.
+    networks:
+      - juris_network
+
+# Define os volumes para persistência de dados
+volumes:
+  db_data:
+
+# Define a rede para comunicação entre os contêineres
+networks:
+  juris_network:
+    driver: bridge

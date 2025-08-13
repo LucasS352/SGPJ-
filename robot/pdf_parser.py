@@ -1,69 +1,129 @@
-# Arquivo: robot/pdf_parser.py (VERSÃO FINAL COM MÚLTIPLAS REGRAS E LIMPEZA)
+# Arquivo: robot/pdf_parser.py (VERSÃO 5.2 - CORREÇÃO DE IMPORT CIRCULAR)
 import fitz  # PyMuPDF
 import re
+import os
+from PIL import Image
+import pytesseract
 
-def clean_name(name):
-    """Remove palavras-chave comuns que são capturadas por engano no nome do réu."""
-    artefatos = [
-        "face de", "em face de", "confronto de", "à presença de vossa excelência",
-        "to de financiamento c.c pedido de consignação em pagamento c.c pedido de antecipação de tutela jurisdicional em face de",
-        "tual e cancelamento de garantia por alienação fiduciária alienação fiduciária de bem imóvel – bem de família – impenhorabilidade em face de"
-    ]
-    name_lower = name.lower()
-    for artefato in artefatos:
-        if artefato in name_lower:
-            name_lower = name_lower.replace(artefato, "")
-    return name_lower.strip().upper()
+# Configuração do Tesseract (ajuste o caminho se necessário)
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-def extract_data_from_petition(pdf_path):
-    """
-    Abre um PDF e tenta uma lista de regras (regex) para extrair os dados de forma robusta.
-    """
-    print(f"\n--- LENDO ARQUIVO PDF: {pdf_path} ---")
+# --- FUNÇÕES AUXILIARES DE VALIDAÇÃO ---
+def _is_cpf_valid(cpf: str) -> bool:
+    cpf = ''.join(re.findall(r'\d', cpf))
+    if len(cpf) != 11 or len(set(cpf)) == 1: return False
+    soma = sum(int(cpf[i]) * (10 - i) for i in range(9)); resto = (soma * 10) % 11
+    if resto == 10: resto = 0
+    if resto != int(cpf[9]): return False
+    soma = sum(int(cpf[i]) * (11 - i) for i in range(10)); resto = (soma * 10) % 11
+    if resto == 10: resto = 0
+    if resto != int(cpf[10]): return False
+    return True
+
+def _is_cnpj_valid(cnpj: str) -> bool:
+    cnpj = ''.join(re.findall(r'\d', cnpj))
+    if len(cnpj) != 14 or len(set(cnpj)) == 1: return False
+    soma = sum(int(d) * w for d, w in zip(cnpj[:12], [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])); resto = soma % 11
+    dv1 = 0 if resto < 2 else 11 - resto
+    if dv1 != int(cnpj[12]): return False
+    soma = sum(int(d) * w for d, w in zip(cnpj[:13], [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])); resto = soma % 11
+    dv2 = 0 if resto < 2 else 11 - resto
+    if dv2 != int(cnpj[13]): return False
+    return True
+# --- FIM DAS FUNÇÕES AUXILIARES ---
+
+def _extract_text_with_ocr(pdf_path: str) -> str:
+    print("  [INFO] PDF sem texto detectado. Acionando modo OCR...")
     full_text = ""
     try:
-        with fitz.open(pdf_path) as doc:
-            for page in doc:
-                full_text += page.get_text()
+        doc = fitz.open(pdf_path)
+        for i, page in enumerate(doc):
+            print(f"    -> Lendo imagem da página {i+1} com OCR...")
+            pix = page.get_pixmap(dpi=300); img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            # Para melhores resultados, instale o Tesseract com o idioma 'por' (Português)
+            full_text += pytesseract.image_to_string(img, lang='eng') + "\n"
+        doc.close()
+        print("  [SUCESSO] Extração via OCR concluída.")
+        return full_text
+    except Exception as e:
+        print(f"  [ERRO] Falha no processo de OCR: {e}")
+        return ""
 
-        normalized_text = " ".join(full_text.lower().split())
+def clean_name(name):
+    """Limpa o nome extraído, removendo qualificações e texto residual."""
+    name = " ".join(str(name).split()) # Normaliza espaços
+    name = re.sub(r",.*", "", name).strip() # Remove tudo após a primeira vírgula
+    return name.upper()
 
-        extracted_data = {
-            "defendant_name": "Não encontrado",
-            "defendant_id": "Não encontrado",
-            "case_value": "Não encontrado"
+def extract_data_from_petition(pdf_path):
+    print(f"\n--- LENDO ARQUIVO PDF (ESTRATÉGIA V5.2 - DUAS PASSAGENS): {pdf_path} ---")
+    try:
+        doc = fitz.open(pdf_path)
+        full_text_plain = "".join(page.get_text() for page in doc)
+        doc.close()
+
+        if len(full_text_plain.strip()) < 200:
+            full_text_plain = _extract_text_with_ocr(pdf_path)
+            if not full_text_plain: raise Exception("Extração de texto e OCR falharam.")
+
+        normalized_text = " ".join(full_text_plain.lower().split())
+        
+        defendant_name = None
+        defendant_id = None
+
+        # --- PRIMEIRA TENTATIVA (ALTA CONFIANÇA): Regex Contextual Completa ---
+        print("  [INFO] Tentando Estratégia 1: Regex de Alta Confiança...")
+        high_confidence_pattern = re.search(
+            r'(?:em face de|ação de cobrança em)\s+(.*?),\s*.*?inscrita?\s+no\s+(?:cnpj|cpf).{0,5}\s+([\d.\-\/]+)',
+            normalized_text,
+            re.IGNORECASE
+        )
+
+        if high_confidence_pattern:
+            potential_name = high_confidence_pattern.group(1)
+            potential_id = high_confidence_pattern.group(2)
+            
+            clean_id_str = ''.join(re.findall(r'\d', potential_id))
+            if _is_cpf_valid(clean_id_str) or _is_cnpj_valid(clean_id_str):
+                defendant_name = clean_name(potential_name)
+                defendant_id = clean_id_str
+                print(f"  [SUCESSO] Dados encontrados via Estratégia 1.")
+
+        # --- SEGUNDA TENTATIVA (FALLBACK): Análise de Bloco Contextual ---
+        if not defendant_name or not defendant_id:
+            print("  [INFO] Estratégia 1 falhou. Tentando Estratégia 2: Análise de Bloco Contextual...")
+            keywords = ["em face de", "contra", "requerido:", "requerida:"]
+            defendant_block = ""
+            for key in keywords:
+                start_pos = normalized_text.find(key)
+                if start_pos != -1:
+                    start_pos += len(key)
+                    defendant_block = normalized_text[start_pos : start_pos + 400]
+                    print(f"  [INFO] Bloco do réu identificado com a chave: '{key}'")
+                    break
+            
+            if defendant_block:
+                if not defendant_name:
+                    match = re.search(r'^(.*?)(?:,)', defendant_block, re.IGNORECASE)
+                    if match:
+                        defendant_name = clean_name(match.group(1))
+
+                if not defendant_id:
+                    id_candidates = re.findall(r'[\d.\-\/]{11,18}', defendant_block)
+                    for candidate in id_candidates:
+                        clean_candidate = ''.join(re.findall(r'\d', candidate))
+                        if _is_cpf_valid(clean_candidate) or _is_cnpj_valid(clean_candidate):
+                            defendant_id = clean_candidate
+                            break
+        
+        final_data = {
+            "defendant_name": defendant_name if defendant_name else "Não encontrado",
+            "defendant_id": defendant_id if defendant_id else "Não encontrado"
         }
 
-        # --- ESTRATÉGIA DE EXTRAÇÃO COM MÚLTIPLAS REGRAS PARA O RÉU ---
-        defendant_patterns = [
-            r'em face de\s*(.*?),\s*.*?(?:cpf|cnpj).*?n[º°]?\s*([\d\.\-\/]+)',
-            r'ação de cobrança em\s*(.*?),\s*.*?(?:cpf|cnpj).*?n[º°]?\s*([\d\.\-\/]+)',
-            r'contra\s*(.*?),\s*.*?(?:cpf|cnpj).*?n[º°]?\s*([\d\.\-\/]+)',
-            r'em\s*(.*?),\s*.*?(?:inscrita no|inscrito no)\s*(?:cpf/?[mf]?|cnpj/?[mf]?)\s*n[º°]?\s*([\d\.\-\/]+)'
-        ]
-
-        for pattern in defendant_patterns:
-            defendant_match = re.search(pattern, normalized_text, re.DOTALL)
-            if defendant_match:
-                # Limpa o nome para remover artefatos e extrai os dados
-                extracted_data["defendant_name"] = clean_name(defendant_match.group(1))
-                extracted_data["defendant_id"] = defendant_match.group(2).strip()
-                break # Para na primeira regra que funcionar
-
-        # --- ESTRATÉGIA DE EXTRAÇÃO COM MÚLTIPLAS REGRAS PARA O VALOR ---
-        value_patterns = [
-            r'(?:dando à presente o valor de|dá-se à causa o valor|dá à causa o valor de|dá-se à causa, o valor de)\s*r\$\s*([\d\.,]+)',
-            r'valor\s*da\s*causa\s*:\s*r\$\s*([\d\.,]+)'
-        ]
-
-        for pattern in value_patterns:
-            value_match = re.search(pattern, normalized_text)
-            if value_match:
-                extracted_data["case_value"] = value_match.group(1).strip()
-                break # Para na primeira regra que funcionar
-
-        return extracted_data
+        print(f"  [RESULTADO FINAL] Nome: {final_data['defendant_name']} | ID: {final_data['defendant_id']}")
+        return final_data
 
     except Exception as e:
-        print(f"Ocorreu um erro ao ler o arquivo PDF: {e}")
-        return None
+        print(f"  [ERRO CRÍTICO] Ocorreu um erro ao ler o arquivo PDF: {e}")
+        return {"defendant_name": "Erro na leitura do PDF", "defendant_id": "Erro na leitura do PDF"}

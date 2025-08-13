@@ -1,7 +1,10 @@
     // src/pages/RegisterPage.js
 
     import React, { useState } from 'react';
-    import { Container, Box, Typography, TextField, Button, Paper, Alert } from '@mui/material';
+    import { 
+    Container, Box, Typography, TextField, Button, 
+    Paper, Alert, Grid, Link as MuiLink, CssBaseline 
+    } from '@mui/material';
     import { useNavigate, Link as RouterLink } from 'react-router-dom';
     import axios from 'axios';
 
@@ -21,7 +24,7 @@
         setSuccess('Usuário registrado com sucesso! Você será redirecionado para o login.');
         setTimeout(() => {
             navigate('/login');
-        }, 2000); // Espera 2 segundos e redireciona
+        }, 2000);
         } catch (err) {
         setError(err.response?.data?.detail || 'Falha ao registrar.');
         console.error(err);
@@ -30,9 +33,10 @@
 
     return (
         <Container component="main" maxWidth="xs">
-        <Paper elevation={3} sx={{ marginTop: 8, padding: 4, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <CssBaseline />
+        <Paper elevation={6} sx={{ marginTop: 8, padding: 4, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <Typography component="h1" variant="h5">
-            Registrar Novo Usuário
+            Criar Nova Conta
             </Typography>
             {error && <Alert severity="error" sx={{ width: '100%', mt: 2 }}>{error}</Alert>}
             {success && <Alert severity="success" sx={{ width: '100%', mt: 2 }}>{success}</Alert>}
@@ -59,13 +63,17 @@
                 type="submit"
                 fullWidth
                 variant="contained"
-                sx={{ mt: 3, mb: 2 }}
+                sx={{ mt: 3, mb: 2, py: 1.5 }}
             >
                 Registrar
             </Button>
-            <Button fullWidth component={RouterLink} to="/login">
-                Já tem uma conta? Faça o login
-            </Button>
+            <Grid container justifyContent="flex-end">
+                <Grid item>
+                    <MuiLink component={RouterLink} to="/login" variant="body2">
+                    {"Já tem uma conta? Faça o login"}
+                    </MuiLink>
+                </Grid>
+                </Grid>
             </Box>
         </Paper>
         </Container>

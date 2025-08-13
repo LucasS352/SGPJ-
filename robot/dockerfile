@@ -1,0 +1,25 @@
+# robot/Dockerfile
+
+# 1. Imagem Base: Usamos a imagem oficial do Playwright com Python.
+#    Ela já vem com Python, Chrome, Firefox, Webkit e todas as dependências de sistema.
+FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
+
+# 2. Define o diretório de trabalho.
+WORKDIR /app
+
+# 3. Instala o Tesseract OCR e o pacote de idioma Português dentro do contêiner.
+RUN apt-get update && \
+    apt-get install -y tesseract-ocr tesseract-ocr-por && \
+    rm -rf /var/lib/apt/lists/*
+
+# 4. Copia o arquivo de dependências do robô.
+COPY requirements.txt .
+
+# 5. Instala as dependências Python do robô (imap-tools, pytesseract, etc.).
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 6. Copia todo o código e arquivos de configuração do robô.
+COPY . .
+
+# 7. Define o comando padrão para executar o robô.
+CMD ["python", "scraper.py"]

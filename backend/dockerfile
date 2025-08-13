@@ -1,0 +1,23 @@
+# backend/Dockerfile
+
+# 1. Imagem Base: Usamos uma imagem oficial do Python, leve e otimizada.
+FROM python:3.11-slim
+
+# 2. Define o diretório de trabalho dentro do contêiner.
+WORKDIR /app
+
+# 3. Copia o arquivo de dependências PRIMEIRO para otimizar o cache do Docker.
+COPY requirements.txt .
+
+# 4. Instala as dependências do backend.
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 5. Copia todo o código do backend para o contêiner.
+COPY . .
+
+# 6. Expõe a porta que o Uvicorn irá usar.
+EXPOSE 8000
+
+# 7. Comando para iniciar o servidor de API quando o contêiner for executado.
+#    O host 0.0.0.0 é essencial para que a API seja acessível de fora do contêiner.
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

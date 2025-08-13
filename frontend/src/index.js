@@ -5,14 +5,18 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import { BrowserRouter } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext'; // <-- IMPORTE O PROVEDOR
+import { AuthProvider } from './context/AuthContext';
+import { ThemeProvider } from '@mui/material/styles'; // <-- IMPORTE O THEMEPROVIDER
+import theme from './theme'; // <-- IMPORTE SEU TEMA
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <BrowserRouter>
-      <AuthProvider> {/* <-- ENVOLVA O APP COM ELE */}
-        <App />
+      <AuthProvider>
+        <ThemeProvider theme={theme}> {/* <-- APLIQUE O TEMA AQUI */}
+          <App />
+        </ThemeProvider>
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>

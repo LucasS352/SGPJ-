@@ -6,29 +6,22 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
 
-# --- IMPORTAÇÕES CORRIGIDAS ---
-from sqlalchemy.orm import Session # <-- A importação que faltava
+# --- AQUI ESTÁ A CORREÇÃO ---
+# Importamos os nossos módulos e a função get_db CENTRALIZADA de database.py
 from . import models
-from .database import SessionLocal
+from .database import get_db
 
 # Configuração de Segurança
-SECRET_KEY = "SUA_CHAVE_SECRETA_MUITO_DIFICIL" # Lembre-se de mudar isso no futuro
+SECRET_KEY = "SUA_CHAVE_SECRETA_MUITO_DIFICIL"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Contexto para hashing de senhas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# Função para obter a sessão do DB (necessária para get_current_user)
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# --- A função get_db() duplicada foi REMOVIDA daqui ---
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -46,7 +39,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# Função para obter o usuário atual a partir do token
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
