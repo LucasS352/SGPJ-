@@ -90,13 +90,7 @@
                 >
                 Entrar
                 </Button>
-                <Grid container justifyContent="flex-end">
-                <Grid item>
-                    <MuiLink component={RouterLink} to="/register" variant="body2">
-                    {"Não tem uma conta? Registre-se"}
-                    </MuiLink>
-                </Grid>
-                </Grid>
+                
             </Box>
             </Paper>
         </Container>

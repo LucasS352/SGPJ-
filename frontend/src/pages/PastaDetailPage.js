@@ -1,12 +1,11 @@
-    // src/pages/PastaDetailPage.js
-
-    import React, { useState, useEffect } from 'react';
+    import React, { useState, useEffect, useCallback } from 'react';
     import { useParams, useNavigate } from 'react-router-dom';
     import axios from 'axios';
     import { 
     Container, Typography, Box, Paper, List, ListItem, ListItemText, 
     Divider, CircularProgress, Alert, Button, IconButton,
-    Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, TextField
+    Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, TextField,
+    TablePagination
     } from '@mui/material';
     import ArrowBackIcon from '@mui/icons-material/ArrowBack';
     import DeleteIcon from '@mui/icons-material/Delete';
@@ -18,30 +17,44 @@
     const [folder, setFolder] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    
+    const [page, setPage] = useState(0);
+    const [rowsPerPage, setRowsPerPage] = useState(10);
+    const [totalRows, setTotalRows] = useState(0);
 
     const [openRemoveDialog, setOpenRemoveDialog] = useState(false);
     const [openEditDialog, setOpenEditDialog] = useState(false);
     const [selectedAssociation, setSelectedAssociation] = useState(null);
     const [observationText, setObservationText] = useState('');
     
-    const fetchFolderDetails = async () => {
-        // Reinicia o estado para uma nova busca
+    const fetchFolderDetails = useCallback(async () => {
         setLoading(true);
         setError(null);
+        const skip = page * rowsPerPage;
         try {
-        const response = await axios.get(`http://127.0.0.1:8000/folders/${folderId}`);
+        const response = await axios.get(`http://127.0.0.1:8000/folders/${folderId}?skip=${skip}&limit=${rowsPerPage}`);
         setFolder(response.data);
+        setTotalRows(response.data.total_processos_count);
         } catch (err) {
-        setError('Não foi possível carregar os detalhes da pasta. Talvez ela não exista ou você não tenha permissão.');
+        setError('Não foi possível carregar os detalhes da pasta.');
         console.error("Erro ao carregar detalhes da pasta:", err);
         } finally {
         setLoading(false);
         }
-    };
+    }, [folderId, page, rowsPerPage]);
 
     useEffect(() => {
         fetchFolderDetails();
-    }, [folderId]);
+    }, [fetchFolderDetails]);
+
+    const handleChangePage = (event, newPage) => {
+        setPage(newPage);
+    };
+
+    const handleChangeRowsPerPage = (event) => {
+        setRowsPerPage(parseInt(event.target.value, 10));
+        setPage(0);
+    };
 
     const handleOpenRemoveDialog = (association) => {
         setSelectedAssociation(association);
@@ -64,7 +77,12 @@
         if (!selectedAssociation) return;
         try {
         await axios.delete(`http://127.0.0.1:8000/folders/${folderId}/processos/${selectedAssociation.processo.id}`);
-        fetchFolderDetails(); // Re-busca os dados para mostrar a lista atualizada
+        // Se estamos na última página e removemos o último item, precisamos voltar uma página
+        if (folder.processo_associations.length === 1 && page > 0) {
+            setPage(page - 1);
+        } else {
+            fetchFolderDetails();
+        }
         } catch (err) {
         console.error("Erro ao remover processo:", err);
         setError("Não foi possível remover o processo.");
@@ -79,7 +97,7 @@
         await axios.patch(`http://127.0.0.1:8000/folders/${folderId}/processos/${selectedAssociation.processo.id}`, {
             observation: observationText,
         });
-        fetchFolderDetails(); // Re-busca os dados para mostrar a lista atualizada
+        fetchFolderDetails();
         } catch (err) {
         console.error("Erro ao salvar observação:", err);
         setError("Não foi possível salvar a observação.");
@@ -88,7 +106,6 @@
         }
     };
 
-    // --- GUARDA 1: MOSTRA O LOADING ENQUANTO BUSCA ---
     if (loading) {
         return (
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
@@ -97,11 +114,10 @@
         );
     }
 
-    // --- GUARDA 2: MOSTRA O ERRO SE A API FALHAR ---
-    if (error) {
+    if (error || !folder) {
         return (
         <Container maxWidth="md" sx={{ mt: 4 }}>
-            <Alert severity="error">{error}</Alert>
+            <Alert severity="error">{error || 'Pasta não encontrada.'}</Alert>
             <Button
             variant="outlined"
             startIcon={<ArrowBackIcon />}
@@ -113,17 +129,7 @@
         </Container>
         );
     }
-    
-    // --- GUARDA 3: MOSTRA UMA MENSAGEM SE, APÓS O LOADING, A PASTA AINDA FOR NULA ---
-    if (!folder) {
-        return (
-            <Container maxWidth="md" sx={{ mt: 4 }}>
-                <Alert severity="warning">Pasta não encontrada.</Alert>
-            </Container>
-        )
-    }
 
-    // --- SE PASSOU POR TODAS AS GUARDAS, PODE RENDERIZAR COM SEGURANÇA ---
     return (
         <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
         <Button variant="outlined" startIcon={<ArrowBackIcon />} sx={{ mb: 2 }} onClick={() => navigate('/pastas')}>
@@ -176,9 +182,20 @@
                 Nenhum processo foi adicionado a esta pasta ainda.
             </Typography>
             )}
+            
+            <TablePagination
+            component="div"
+            count={totalRows}
+            page={page}
+            onPageChange={handleChangePage}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={handleChangeRowsPerPage}
+            rowsPerPageOptions={[5, 10, 25]}
+            labelRowsPerPage="Processos por página:"
+            labelDisplayedRows={({ from, to, count }) => `${from}-${to} de ${count !== -1 ? count : `mais de ${to}`}`}
+            />
         </Paper>
 
-        {/* Diálogo de Confirmação para Remover */}
         <Dialog open={openRemoveDialog} onClose={handleCloseDialogs}>
             <DialogTitle>Confirmar Remoção</DialogTitle>
             <DialogContent>
@@ -192,7 +209,6 @@
             </DialogActions>
         </Dialog>
 
-        {/* Diálogo para Editar Observação */}
         <Dialog open={openEditDialog} onClose={handleCloseDialogs} fullWidth maxWidth="sm">
             <DialogTitle>Adicionar/Editar Observação</DialogTitle>
             <DialogContent>

@@ -154,10 +154,10 @@ class TjspScraper:
                             async with page.expect_navigation(timeout=30000):
                                 await page.get_by_text(process_number_text, exact=True).click()
                         except TimeoutError:
-                             print(f"  [ERRO CRÍTICO] Timeout ao navegar para o processo {process_number_text}.")
-                             print("  [AÇÃO DE RECUPERAÇÃO] Abandonando a busca para a OAB ATUAL para garantir a estabilidade da sessão.")
-                             oab_session_stable = False
-                             break
+                            print(f"  [ERRO CRÍTICO] Timeout ao navegar para o processo {process_number_text}.")
+                            print("  [AÇÃO DE RECUPERAÇÃO] Abandonando a busca para a OAB ATUAL para garantir a estabilidade da sessão.")
+                            oab_session_stable = False
+                            break
                         
                         page_content = await page.content()
                         if "extinto" in page_content.lower() or "cancelado" in page_content.lower():
@@ -241,7 +241,7 @@ async def main():
     try:
         dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
         if not os.path.exists(dotenv_path):
-             dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+            dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
         load_dotenv(dotenv_path=dotenv_path)
 
         tjsp_user = os.getenv("TJSP_USER")

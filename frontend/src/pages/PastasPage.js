@@ -1,8 +1,6 @@
-    // src/pages/PastasPage.js
-
-    import React, { useState, useEffect } from 'react';
+    import React, { useState, useEffect, useCallback } from 'react';
     import axios from 'axios';
-    import { Link as RouterLink } from 'react-router-dom';
+    import { Link as RouterLink, useLocation } from 'react-router-dom';
     import {
     Container,
     Typography,
@@ -24,12 +22,14 @@
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(null);
+    const location = useLocation();
 
-    const fetchFolders = async () => {
-        try {
+    const fetchFolders = useCallback(async () => {
+        setLoading(true);
         setError(null);
-        // O token de autorização já é enviado automaticamente pelo nosso AuthContext
-        const response = await axios.get('http://127.0.0.1:8000/folders/');
+        try {
+        const cacheBuster = `?_=${new Date().getTime()}`;
+        const response = await axios.get(`http://127.0.0.1:8000/folders/${cacheBuster}`);
         setFolders(response.data);
         } catch (err) {
         setError('Falha ao carregar as pastas.');
@@ -37,7 +37,7 @@
         } finally {
         setLoading(false);
         }
-    };
+    }, []);
 
     const handleCreateFolder = async (e) => {
         e.preventDefault();
@@ -45,19 +45,18 @@
         setError('O nome da pasta não pode estar em branco.');
         return;
         }
-
         try {
         setError(null);
         setSuccess(null);
         
-        const response = await axios.post('http://127.0.0.1:8000/folders/', {
+        await axios.post('http://127.0.0.1:8000/folders/', {
             name: newFolderName
         });
 
-        setFolders([...folders, response.data]);
         setSuccess(`Pasta "${newFolderName}" criada com sucesso!`);
         setNewFolderName('');
-
+        fetchFolders(); // Re-busca a lista para garantir consistência
+        
         } catch (err) {
         if (err.response && err.response.status === 400) {
             setError(err.response.data.detail || 'Já existe uma pasta com este nome.');
@@ -70,7 +69,7 @@
 
     useEffect(() => {
         fetchFolders();
-    }, []);
+    }, [location, fetchFolders]);
 
     if (loading) {
         return (
@@ -86,7 +85,7 @@
             Gerenciador de Pastas
         </Typography>
 
-        <Paper sx={{ p: 2, mb: 4 }}>
+        <Paper sx={{ p: 2, mb: 4 }} elevation={2}>
             <Typography variant="h6" gutterBottom>Criar Nova Pasta</Typography>
             <Box component="form" onSubmit={handleCreateFolder} sx={{ display: 'flex', gap: 2 }}>
             <TextField
@@ -104,14 +103,12 @@
             {success && <Alert severity="success" sx={{ mt: 2 }}>{success}</Alert>}
         </Paper>
 
-        <Paper>
+        <Paper elevation={2}>
             <Typography variant="h6" gutterBottom sx={{ p: 2 }}>Pastas Existentes</Typography>
             <Divider />
             {folders.length > 0 ? (
-            <List>
+            <List sx={{ p: 0 }}>
                 {folders.map((folder) => (
-                // --- ESTA É A MUDANÇA PRINCIPAL ---
-                // O ListItemButton agora funciona como um link para a página de detalhes
                 <ListItemButton 
                     key={folder.id} 
                     component={RouterLink} 

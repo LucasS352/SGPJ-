@@ -1,16 +1,20 @@
+# arquivo: backend/database.py
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool  # Importa o NullPool para desativar o pool de conexões
 
-# Verifique se esta URL corresponde exatamente à sua configuração do MariaDB
-DATABASE_URL = "mysql+pymysql://root:@localhost:3307/juris_db"
+# Sua string de conexão (verifique se continua correta)
+DATABASE_URL = "mysql+pymysql://root:@localhost:3307/leads"
 
-# Engine configurado para maior estabilidade
+# --- CONFIGURAÇÃO ROBUSTA DO ENGINE ---
 engine = create_engine(
-    DATABASE_URL,
-    # Desativa o pool de conexões para evitar travamentos em certos ambientes
+    DATABASE_URL, 
+
+    # 1. Desativa o pool de conexões, que é a causa mais provável do travamento.
     poolclass=NullPool,
-    # Define um tempo limite de 10 segundos para a tentativa de conexão inicial
+
+    # 2. Adiciona um tempo limite explícito de 10 segundos para a conexão.
     connect_args={"connect_timeout": 10}
 )
 
@@ -20,7 +24,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 class Base(DeclarativeBase):
     pass
 
-# Função de dependência centralizada para obter a sessão do banco de dados
+# Função de dependência centralizada para obter a sessão do banco
 def get_db():
     db = SessionLocal()
     try:

@@ -2,19 +2,24 @@
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
-from typing import List
+from sqlalchemy import or_  # <-- Importação de 'or_' movida para o local correto
+from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
 
+# Importações locais do projeto
 from . import models, schemas, security
 from .database import get_db, engine
 
+# Lembre-se de deixar esta linha comentada para o desenvolvimento do dia-a-dia
+# 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+# Configuração do CORS
 origins = ["http://localhost:3000"]
 app.add_middleware(
     CORSMiddleware,
@@ -24,6 +29,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- ENDPOINTS PARA PROCESSOS ---
 @app.post("/processos/", response_model=schemas.Processo)
 def create_processo(processo: schemas.ProcessoCreate, db: Session = Depends(get_db)):
     db_processo = db.query(models.Processo).filter(models.Processo.numero_processo == processo.numero_processo).first()
@@ -36,11 +42,29 @@ def create_processo(processo: schemas.ProcessoCreate, db: Session = Depends(get_
     return db_processo
 
 @app.get("/processos/", response_model=schemas.ProcessosResponse)
-def read_processos(skip: int = 0, limit: int = 10, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    total_count = db.query(models.Processo).count()
-    processos_na_pagina = db.query(models.Processo).options(
+def read_processos(
+    skip: int = 0, 
+    limit: int = 10, 
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(security.get_current_user),
+    search: Optional[str] = None
+):
+    query = db.query(models.Processo)
+
+    if search:
+        query = query.filter(
+            or_(
+                models.Processo.nome_reu.ilike(f"%{search}%"),
+                models.Processo.numero_processo.ilike(f"%{search}%")
+            )
+        )
+
+    total_count = query.count()
+    
+    processos_na_pagina = query.options(
         selectinload(models.Processo.folder_associations)
     ).offset(skip).limit(limit).all()
+    
     return {"total_count": total_count, "data": processos_na_pagina}
 
 @app.patch("/processos/{processo_id}/status", response_model=schemas.Processo)
@@ -62,6 +86,7 @@ def update_processo_status(
     updated_processo = db.query(models.Processo).filter(models.Processo.id == processo_id).first()
     return updated_processo
 
+# --- ENDPOINTS PARA PASTAS (FOLDERS) ---
 @app.post("/folders/", response_model=schemas.Folder)
 def create_folder(folder: schemas.FolderCreate, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
     db_folder = db.query(models.Folder).filter(models.Folder.name == folder.name, models.Folder.owner_id == current_user.id).first()
@@ -80,17 +105,37 @@ def read_folders(db: Session = Depends(get_db), current_user: models.User = Depe
     ).filter(models.Folder.owner_id == current_user.id).all()
     return folders
 
-@app.get("/folders/{folder_id}", response_model=schemas.Folder)
-def read_folder(folder_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(security.get_current_user)):
-    folder = db.query(models.Folder).options(
-        selectinload(models.Folder.processo_associations).selectinload(models.FolderProcessAssociation.processo)
-    ).filter(
+@app.get("/folders/{folder_id}", response_model=schemas.FolderDetail)
+def read_folder(
+    folder_id: int, 
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(security.get_current_user),
+    skip: int = 0,
+    limit: int = 10
+):
+    folder = db.query(models.Folder).filter(
         models.Folder.id == folder_id,
         models.Folder.owner_id == current_user.id
     ).first()
+
     if folder is None:
         raise HTTPException(status_code=404, detail="Pasta não encontrada ou não pertence ao usuário.")
-    return folder
+    
+    total_processos_count = db.query(models.FolderProcessAssociation).filter_by(folder_id=folder_id).count()
+
+    associations_paginated = db.query(models.FolderProcessAssociation).options(
+        selectinload(models.FolderProcessAssociation.processo)
+    ).filter_by(folder_id=folder_id).offset(skip).limit(limit).all()
+
+    response_folder = schemas.FolderDetail(
+        id=folder.id,
+        name=folder.name,
+        owner_id=folder.owner_id,
+        total_processos_count=total_processos_count,
+        processo_associations=associations_paginated
+    )
+    
+    return response_folder
 
 class AddProcessosRequest(BaseModel):
     processo_ids: List[int]
@@ -146,6 +191,7 @@ def remove_processo_from_folder(folder_id: int, processo_id: int, db: Session = 
     db.commit()
     return
 
+# --- ENDPOINTS PARA USUÁRIOS E AUTENTICAÇÃO ---
 @app.post("/users/", response_model=schemas.User)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.username == user.username).first()

@@ -36,3 +36,16 @@
     transform: rotate(360deg);
   }
 }
+/* src/App.css */
+
+/* Melhora o destaque da aba ativa no Material-UI */
+.MuiTabs-indicator {
+  height: 3px !important; /* Deixa a linha indicadora mais grossa */
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
+}
+
+.MuiTab-root {
+  text-transform: none !important; /* Texto das abas em formato normal, não maiúsculo */
+  font-weight: 600 !important;
+}
